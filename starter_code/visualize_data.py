@@ -1,8 +1,10 @@
 """
-Starter Data Visualization & Exploratory Data Analysis (EDA) for TCGA-LGG Challenge.
-Visualizes multi-channel brain MRI slices (Pre-contrast, FLAIR, Post-contrast), ground-truth
-FLAIR abnormality overlays, slice-level class balance, axial tumor progression, and
-radiogenomic molecular subtypes (IDH1/2 & 1p/19q codeletion).
+Exploratory Data Analysis (EDA) & Visualization for GlioRad (TCGA-LGG Challenge).
+Visualizes multi-channel brain MRI scans (Pre-contrast, FLAIR, Post-contrast),
+expert abnormality segmentation masks, and patient radiogenomic distributions (IDH / 1p19q).
+
+Dataset: mateuszbuda/lgg-mri-segmentation
+Source: The Cancer Genome Atlas (TCGA-LGG) & The Cancer Imaging Archive (TCIA)
 
 Usage:
     python starter_code/visualize_data.py
@@ -25,63 +27,34 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         pass
 
 
-def synthesize_brain_mri_slice(has_tumor: bool = True, size: int = 256, seed: int = 42):
-    """
-    Generate a realistic synthetic 3-channel brain MRI slice (Pre-contrast, FLAIR, Post-contrast)
-    and corresponding binary glioma mask when raw TIFF/PNG scans are not yet downloaded locally.
-    """
-    rng = np.random.default_rng(seed)
-    yy, xx = np.mgrid[:size, :size]
-    cx, cy = size // 2, size // 2
+def find_mri_slice_on_disk(row: pd.Series, search_roots):
+    """Searches for real patient slice files across common local directories."""
+    img_name = str(row.get("image_file", ""))
+    mask_name = str(row.get("mask_file", ""))
+    patient_id = str(row.get("patient_id", ""))
 
-    # Elliptical brain parenchyma
-    brain_dist = ((xx - cx) / (size * 0.36)) ** 2 + ((yy - cy) / (size * 0.42)) ** 2
-    brain_mask = brain_dist <= 1.0
-    skull_ring = (brain_dist > 1.0) & (brain_dist <= 1.12)
+    for root in search_roots:
+        if not root or not root.exists():
+            continue
 
-    img = np.zeros((size, size, 3), dtype=np.float32)
-    for c, base_intensity in enumerate([0.42, 0.50, 0.45]):
-        channel = np.zeros((size, size), dtype=np.float32)
-        channel[brain_mask] = base_intensity + 0.08 * np.cos(brain_dist[brain_mask] * 3.14)
-        channel[skull_ring] = 0.22
-        channel += rng.normal(0, 0.025, (size, size))
-        img[:, :, c] = np.clip(channel, 0.0, 1.0)
+        # Check candidate locations
+        candidates = [
+            (root / img_name, root / mask_name),
+            (root / patient_id / img_name, root / patient_id / mask_name),
+            (root / "kaggle_3m" / patient_id / img_name, root / "kaggle_3m" / patient_id / mask_name),
+        ]
+        for img_p, mask_p in candidates:
+            if img_p.exists():
+                img = np.array(Image.open(img_p).convert("RGB"))
+                mask = None
+                if mask_p.exists():
+                    m = np.array(Image.open(mask_p).convert("L"))
+                    mask = (m > 127).astype(np.uint8)
+                else:
+                    mask = np.zeros(img.shape[:2], dtype=np.uint8)
+                return img, mask
 
-    # Ventricles (dark CSF in center)
-    vent_left = (((xx - (cx - 14)) / 8.0) ** 2 + ((yy - cy) / 22.0) ** 2) <= 1.0
-    vent_right = (((xx - (cx + 14)) / 8.0) ** 2 + ((yy - cy) / 22.0) ** 2) <= 1.0
-    img[vent_left | vent_right] *= 0.25
-
-    mask = np.zeros((size, size), dtype=np.uint8)
-    if has_tumor:
-        tx = cx + rng.integers(-38, 38)
-        ty = cy + rng.integers(-35, 35)
-        rx = rng.integers(18, 28)
-        ry = rng.integers(16, 26)
-        tumor_region = (((xx - tx) / rx) ** 2 + ((yy - ty) / ry) ** 2) <= 1.0
-        tumor_region = tumor_region & brain_mask
-        mask[tumor_region] = 1
-        # Hyperintense signal on FLAIR (Channel 1) and Post-contrast (Channel 2)
-        img[tumor_region, 0] = np.clip(img[tumor_region, 0] * 0.85, 0.0, 1.0)
-        img[tumor_region, 1] = np.clip(img[tumor_region, 1] + 0.38, 0.0, 1.0)
-        img[tumor_region, 2] = np.clip(img[tumor_region, 2] + 0.22, 0.0, 1.0)
-
-    return (img * 255).astype(np.uint8), mask
-
-
-def load_or_synthesize_slice(row: pd.Series, images_dir: Path, masks_dir: Path):
-    """Load real MRI image and mask from disk if present, otherwise synthesize realistic slice."""
-    img_file = str(row.get("image_file", ""))
-    mask_file = str(row.get("mask_file", ""))
-
-    if images_dir and masks_dir and (images_dir / img_file).exists() and (masks_dir / mask_file).exists():
-        img = np.array(Image.open(images_dir / img_file).convert("RGB"))
-        m = np.array(Image.open(masks_dir / mask_file).convert("L"))
-        mask = (m > 127).astype(np.uint8)
-        return img, mask
-
-    seed = abs(hash(f"{row.get('patient_id', 'p')}_{row.get('slice_idx', 1)}")) % 10000
-    return synthesize_brain_mri_slice(has_tumor=bool(row.get("has_tumor", 1)), seed=seed)
+    return None, None
 
 
 def overlay_mask_on_mri(image: np.ndarray, mask: np.ndarray, color=(0, 255, 220), alpha: float = 0.45) -> np.ndarray:
@@ -95,8 +68,7 @@ def overlay_mask_on_mri(image: np.ndarray, mask: np.ndarray, color=(0, 255, 220)
 
 def create_tcga_lgg_eda_dashboard(
     manifest_csv: Path,
-    images_dir: Path,
-    masks_dir: Path,
+    search_dirs: list,
     output_path: Path,
     show_plot: bool = False
 ):
@@ -107,159 +79,116 @@ def create_tcga_lgg_eda_dashboard(
     df = pd.read_csv(manifest_csv)
     print(f"📊 Loaded {len(df)} MRI slice entries across {df['patient_id'].nunique()} patients.")
 
-    # Pick a tumor-positive row for top-row imaging inspection
-    pos_rows = df[df["has_tumor"] == 1]
-    sample_row = pos_rows.iloc[0] if len(pos_rows) > 0 else df.iloc[0]
-    img_rgb, mask_bin = load_or_synthesize_slice(sample_row, images_dir, masks_dir)
+    # Find sample real slice if downloaded
+    sample_row = df[df["has_tumor"] == 1].iloc[0] if (df["has_tumor"] == 1).any() else df.iloc[0]
+    img_rgb, mask_bin = find_mri_slice_on_disk(sample_row, search_dirs)
 
     fig = plt.figure(figsize=(18, 11), dpi=150)
     fig.suptitle(
-        "TCGA-LGG Brain MRI Glioma Segmentation — Exploratory Data Analysis & Modality Overview",
+        "GlioRad: Lower-Grade Glioma (TCGA-LGG) Radiogenomics & Segmentation EDA",
         fontsize=16,
         fontweight="bold",
         y=0.98
     )
 
-    # ==================== TOP-LEFT: FLAIR CHANNEL & RGB COMPOSITE ====================
-    ax1 = fig.add_subplot(2, 3, 1)
-    ax1.imshow(img_rgb[:, :, 1], cmap="bone")
-    ax1.set_title(
-        f"FLAIR Channel (Channel 1)\nPatient: {sample_row['patient_id']} (Slice #{sample_row['slice_idx']})",
-        fontsize=11.5,
-        fontweight="bold"
-    )
-    ax1.axis("off")
+    gs = fig.add_gridspec(2, 4, height_ratios=[1.2, 1.0], hspace=0.35, wspace=0.28)
 
-    # ==================== TOP-CENTER: MULTI-MODAL RGB + CONTOUR ====================
-    ax2 = fig.add_subplot(2, 3, 2)
-    ax2.imshow(img_rgb)
-    if mask_bin.sum() > 0:
-        ax2.contour(mask_bin, levels=[0.5], colors=["#00FFCC"], linewidths=2.0)
-    ax2.set_title(
-        "Multi-Channel MRI Composite\n[R: Pre-Contrast | G: FLAIR | B: Post-Contrast]",
-        fontsize=11.5,
-        fontweight="bold"
-    )
-    ax2.axis("off")
-
-    # ==================== TOP-RIGHT: GROUND-TRUTH MASK OVERLAY ====================
-    ax3 = fig.add_subplot(2, 3, 3)
-    blended = overlay_mask_on_mri(img_rgb, mask_bin, color=(0, 255, 200), alpha=0.48)
-    ax3.imshow(blended)
-    if mask_bin.sum() > 0:
-        ax3.contour(mask_bin, levels=[0.5], colors=["#FF3366"], linewidths=1.8)
-    tumor_px = int(mask_bin.sum())
-    ax3.set_title(
-        f"Ground-Truth Glioma Overlay\nFLAIR Abnormality Area: {tumor_px:,} px²",
-        fontsize=11.5,
-        fontweight="bold"
-    )
-    ax3.axis("off")
-
-    # ==================== BOTTOM-LEFT: SLICE POSITIVITY CLASS BALANCE ====================
-    ax4 = fig.add_subplot(2, 3, 4)
-    tumor_counts = df["has_tumor"].value_counts().reindex([0, 1], fill_value=0)
-    labels = ["Normal Brain Slice\n(has_tumor = 0)", "FLAIR Glioma Present\n(has_tumor = 1)"]
-    colors = ["#4A90E2", "#E65540"]
-    bars = ax4.bar(labels, tumor_counts.values, color=colors, edgecolor="black", width=0.55, alpha=0.88)
-    ax4.set_title("Slice-Level Class Balance (2D Axial Slices)", fontsize=12, fontweight="bold")
-    ax4.set_ylabel("Number of MRI Slices")
-    ax4.grid(axis="y", linestyle="--", alpha=0.4)
-
-    total_slices = max(1, len(df))
-    for bar, cnt in zip(bars, tumor_counts.values):
-        pct = 100.0 * cnt / total_slices
-        ax4.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            bar.get_height() + (tumor_counts.max() * 0.02),
-            f"{cnt} slices ({pct:.1f}%)",
-            ha="center",
-            va="bottom",
-            fontsize=9.5,
-            fontweight="bold"
-        )
-    ax4.set_ylim(0, tumor_counts.max() * 1.18 if tumor_counts.max() > 0 else 10)
-
-    # ==================== BOTTOM-CENTER: AXIAL SLICE TUMOR PROGRESSION ====================
-    ax5 = fig.add_subplot(2, 3, 5)
-    slice_prob = df.groupby("slice_idx")["has_tumor"].mean() * 100.0
-    ax5.plot(slice_prob.index, slice_prob.values, marker="o", linewidth=2.5, color="#8E44AD", label="Tumor Frequency (%)")
-    ax5.fill_between(slice_prob.index, slice_prob.values, color="#8E44AD", alpha=0.2)
-    ax5.set_title("Spatial Tumor Probability Across Axial Slice Index", fontsize=12, fontweight="bold")
-    ax5.set_xlabel("Axial Slice Index (Inferior → Superior)")
-    ax5.set_ylabel("Slices Containing Tumor (%)")
-    ax5.set_ylim(0, 108)
-    ax5.grid(linestyle="--", alpha=0.4)
-    ax5.legend(loc="upper right")
-
-    # ==================== BOTTOM-RIGHT: RADIOGENOMIC SUBTYPES ====================
-    ax6 = fig.add_subplot(2, 3, 6)
-    if "idh_status" in df.columns and "codeletion_1p19q" in df.columns:
-        patient_df = df.drop_duplicates(subset=["patient_id"])
-        ct = pd.crosstab(patient_df["idh_status"], patient_df["codeletion_1p19q"])
-        ct.plot(kind="bar", ax=ax6, color=["#2ECC71", "#F39C12"], edgecolor="black", alpha=0.88)
-        ax6.set_title("Patient Radiogenomic Subtypes (IDH vs. 1p/19q)", fontsize=12, fontweight="bold")
-        ax6.set_xlabel("IDH1/2 Mutation Status")
-        ax6.set_ylabel("Number of Patients")
-        ax6.tick_params(axis="x", rotation=0)
-        ax6.legend(title="1p/19q Status")
-        ax6.grid(axis="y", linestyle="--", alpha=0.4)
+    # ==================== TOP ROW: MRI SCAN CHANNELS & TUMOR ABNORMALITY ====================
+    if img_rgb is not None and mask_bin is not None:
+        titles = [
+            ("Pre-contrast T1", img_rgb[:, :, 0], "gray"),
+            ("FLAIR (Tumor Hyperintensity)", img_rgb[:, :, 1], "gray"),
+            ("Post-contrast T1", img_rgb[:, :, 2], "gray"),
+            ("Abnormality Segmentation Overlay", overlay_mask_on_mri(img_rgb, mask_bin), None),
+        ]
+        for col_idx, (title, data, cmap) in enumerate(titles):
+            ax = fig.add_subplot(gs[0, col_idx])
+            if cmap:
+                ax.imshow(data, cmap=cmap)
+            else:
+                ax.imshow(data)
+            ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
+            ax.axis("off")
     else:
-        per_p = df.groupby("patient_id")["has_tumor"].sum()
-        ax6.hist(per_p.values, bins=8, color="#2ECC71", edgecolor="black", alpha=0.85)
-        ax6.set_title("Tumor-Bearing Slices per Patient", fontsize=12, fontweight="bold")
-        ax6.set_xlabel("Positive Slices Count")
-        ax6.set_ylabel("Patients")
+        # Informative notice that scans can be downloaded from Kaggle
+        ax_banner = fig.add_subplot(gs[0, :])
+        ax_banner.set_facecolor("#F8FAFC")
+        ax_banner.text(
+            0.5, 0.55,
+            "[TCGA-LGG Brain MRI Dataset: mateuszbuda/lgg-mri-segmentation]\n"
+            "To view multi-channel MRI overlays locally, download the dataset using Kaggle CLI:\n\n"
+            "kaggle datasets download -d mateuszbuda/lgg-mri-segmentation -p data/kaggle_lgg/ --unzip",
+            ha="center", va="center", fontsize=12, color="#1E293B",
+            bbox=dict(boxstyle="round,pad=1.2", facecolor="#E2E8F0", edgecolor="#CBD5E1")
+        )
+        ax_banner.axis("off")
 
-    plt.tight_layout(rect=[0, 0, 1, 0.94])
+    # ==================== BOTTOM ROW: RADIOGENOMIC DISTRIBUTIONS ====================
+    ax1 = fig.add_subplot(gs[1, 0])
+    tumor_counts = df.groupby("patient_id")["has_tumor"].mean() * 100
+    ax1.hist(tumor_counts, bins=12, color="#0EA5E9", edgecolor="white", alpha=0.9)
+    ax1.set_title("Patient Tumor Burden\n(% Slices with Abnormality)", fontsize=11, fontweight="bold")
+    ax1.set_xlabel("% Positive Slices", fontsize=10)
+    ax1.set_ylabel("Patient Count", fontsize=10)
+    ax1.grid(axis="y", linestyle="--", alpha=0.5)
+
+    ax2 = fig.add_subplot(gs[1, 1])
+    if "idh_status" in df.columns:
+        idh_counts = df.drop_duplicates(subset=["patient_id"])["idh_status"].value_counts()
+        colors = ["#10B981" if "Mutant" in str(k) else "#EF4444" for k in idh_counts.index]
+        bars = ax2.bar(idh_counts.index.astype(str), idh_counts.values, color=colors, edgecolor="black", alpha=0.85)
+        ax2.set_title("IDH Mutation Status\n(Key Prognostic Biomarker)", fontsize=11, fontweight="bold")
+        ax2.set_ylabel("Patients", fontsize=10)
+        for b in bars:
+            ax2.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.1, f"{int(b.get_height())}", ha="center", fontweight="bold")
+    ax2.grid(axis="y", linestyle="--", alpha=0.5)
+
+    ax3 = fig.add_subplot(gs[1, 2])
+    if "codeletion_1p19q" in df.columns:
+        codel_counts = df.drop_duplicates(subset=["patient_id"])["codeletion_1p19q"].value_counts()
+        colors = ["#6366F1" if "codel" in str(k).lower() and "non" not in str(k).lower() else "#F59E0B" for k in codel_counts.index]
+        bars = ax3.bar(codel_counts.index.astype(str), codel_counts.values, color=colors, edgecolor="black", alpha=0.85)
+        ax3.set_title("1p/19q Co-deletion\n(Oligodendroglioma Hallmark)", fontsize=11, fontweight="bold")
+        ax3.set_ylabel("Patients", fontsize=10)
+        for b in bars:
+            ax3.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.1, f"{int(b.get_height())}", ha="center", fontweight="bold")
+    ax3.grid(axis="y", linestyle="--", alpha=0.5)
+
+    ax4 = fig.add_subplot(gs[1, 3])
+    slice_pos = df.groupby("slice_idx")["has_tumor"].mean() * 100
+    ax4.plot(slice_pos.index, slice_pos.values, marker="o", color="#8B5CF6", linewidth=2.5)
+    ax4.fill_between(slice_pos.index, slice_pos.values, color="#8B5CF6", alpha=0.25)
+    ax4.set_title("Abnormality Occurrence\nby Slice Depth (Z-axis)", fontsize=11, fontweight="bold")
+    ax4.set_xlabel("Slice Index", fontsize=10)
+    ax4.set_ylabel("% Slices with Tumor", fontsize=10)
+    ax4.grid(True, linestyle="--", alpha=0.5)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=150)
-    print(f"✅ Saved TCGA-LGG EDA visualization dashboard to: {output_path}")
+    plt.savefig(output_path, bbox_inches="tight", dpi=150)
+    print(f"✅ Generated Exploratory Data Analysis Overview: {output_path}")
 
     if show_plot:
         plt.show()
-    else:
-        plt.close(fig)
-
-
-def main():
-    root = Path(__file__).resolve().parent.parent
-    parser = argparse.ArgumentParser(description="Visualize TCGA-LGG Brain MRI dataset and radiogenomic metadata.")
-    parser.add_argument(
-        "--manifest",
-        type=str,
-        default=str(root / "data" / "public" / "train_manifest.csv"),
-        help="Path to train_manifest.csv"
-    )
-    parser.add_argument(
-        "--images-dir",
-        type=str,
-        default=str(root / "data" / "mock_lgg" / "images"),
-        help="Optional directory with MRI slice images"
-    )
-    parser.add_argument(
-        "--masks-dir",
-        type=str,
-        default=str(root / "data" / "mock_lgg" / "masks"),
-        help="Optional directory with binary mask images"
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=str(root / "starter_code" / "eda_tcga_lgg_overview.png"),
-        help="Output path for the generated EDA figure"
-    )
-    parser.add_argument("--show", action="store_true", help="Display interactive matplotlib window")
-    args = parser.parse_args()
-
-    create_tcga_lgg_eda_dashboard(
-        manifest_csv=Path(args.manifest),
-        images_dir=Path(args.images_dir),
-        masks_dir=Path(args.masks_dir),
-        output_path=Path(args.output),
-        show_plot=args.show
-    )
+    plt.close()
 
 
 if __name__ == "__main__":
-    main()
+    root = Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser(description="Generate EDA visualization for GlioRad TCGA-LGG Challenge")
+    parser.add_argument("--manifest", type=str, default=str(root / "data" / "public" / "train_manifest.csv"), help="Path to train manifest")
+    parser.add_argument("--output", type=str, default=str(root / "starter_code" / "eda_tcga_lgg_overview.png"), help="Output path for EDA image")
+    parser.add_argument("--show", action="store_true", help="Display plot interactively")
+    args = parser.parse_args()
+
+    search_roots = [
+        root / "data" / "kaggle_lgg",
+        root / "data" / "processed_lgg",
+        root / "data" / "kaggle_lgg" / "kaggle_3m",
+    ]
+
+    create_tcga_lgg_eda_dashboard(
+        manifest_csv=Path(args.manifest),
+        search_dirs=search_roots,
+        output_path=Path(args.output),
+        show_plot=args.show
+    )

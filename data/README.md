@@ -1,10 +1,22 @@
-# 📂 TCGA-LGG Dataset & Public Files
+# 📂 GlioRad: TCGA-LGG Dataset & Public Files
 
-This directory contains the data preparation scripts, dataset manifests, and public files for the TCGA-LGG Brain MRI Glioma Segmentation Challenge.
+This directory contains the dataset manifests, documentation, and data preparation utilities for the GlioRad Lower-Grade Glioma (LGG) Brain MRI Segmentation Challenge.
 
-## Public Files (`data/public/`)
+---
 
-These files are public and distributed directly to participants for training and local benchmarking:
+## 🏥 Official Dataset Source
+
+- **Dataset:** [Brain MRI Segmentation (`mateuszbuda/lgg-mri-segmentation`)](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation)
+- **Source:** Sourced from **The Cancer Genome Atlas (TCGA)** and **The Cancer Imaging Archive (TCIA)**
+- **Citation:** Buda, Saha, & Mazurowski, *"Association of genomic subtypes of lower-grade gliomas with shape features automatically extracted by a deep learning algorithm,"* Computers in Biology and Medicine, 2019.
+- **Patients:** **110 real neuro-oncology patients** with available FLAIR MRI sequences and genomic cluster data.
+- **Images:** **3,929 paired multi-channel MRI slices** and expert manual FLAIR abnormality masks.
+
+---
+
+## 📄 Public Files (`data/public/`)
+
+These manifest files are distributed to participants for local training and benchmarking:
 
 | File | Description | Schema / Columns |
 |---|---|---|
@@ -14,38 +26,38 @@ These files are public and distributed directly to participants for training and
 
 ---
 
-## Zero-Leakage Patient-Level Split
+## 🔒 Zero-Leakage Patient-Level Split
 
 Lower-grade glioma MRI volumes exhibit strong spatial correlation across contiguous slices within the same patient.
-To ensure valid real-world generalization:
+To ensure valid, clinical generalization:
 - **Splits are partitioned strictly at the patient level**.
-- Slices belonging to a patient assigned to test appear exclusively in the test set.
+- Slices belonging to a patient assigned to test appear exclusively in the test set. No slice-level data leakage occurs across splits.
 
 ---
 
-## Run-Length Encoding (RLE) Format
+## 🔢 Run-Length Encoding (RLE) Format
 
 Binary masks for $256 \times 256$ slices are compressed into RLE strings:
-- Pairs of integers: `start length start length ...` (1-based or 0-based flattened index).
-- Empty string indicates no tumor on that slice.
-- Decoding utility: [`competition/evaluate.py`](../competition/evaluate.py) `rle_to_mask(rle_string)`.
+- Pairs of integers: `start length start length ...` (1-based flattened index).
+- An empty string `""` indicates no tumor is present on that slice.
+- Decoding utility: [`competition/evaluate.py`](../competition/evaluate.py) via `rle_to_mask(rle_string)`.
 
 ---
 
-## Generating Mock Dataset (for Rapid Dev & CI)
+## ⬇️ How to Acquire the Dataset
 
-To generate synthetic multi-channel MRI slices and binary masks:
+### Option A: In Kaggle Notebooks (Recommended)
+1. Open your notebook on Kaggle.
+2. In the right-hand sidebar under **Input**, click **`+ Add Input`**.
+3. Search for: `mateuszbuda/lgg-mri-segmentation`
+4. Click **`+` (Add)** to mount it directly at `/kaggle/input/lgg-mri-segmentation/kaggle_3m`.
+
+### Option B: Local Download via Kaggle CLI
 ```bash
-python data/download.py --generate-mock --output-dir data/mock_lgg
+kaggle datasets download -d mateuszbuda/lgg-mri-segmentation -p data/kaggle_lgg/ --unzip
 ```
 
-## Downloading Official Kaggle TCGA-LGG Dataset
-
-1. Download dataset using Kaggle CLI:
-   ```bash
-   kaggle datasets download -d mateuszbuda/lgg-mri-segmentation -p data/kaggle_lgg/ --unzip
-   ```
-2. Run patient-level preprocessor:
-   ```bash
-   python data/preprocess_lgg.py --raw-dir data/kaggle_lgg/ --output-dir data/processed_lgg/
-   ```
+To run the patient-level preprocessor:
+```bash
+python data/preprocess_lgg.py --raw-dir data/kaggle_lgg/kaggle_3m --output-dir data/processed_lgg/
+```
