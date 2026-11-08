@@ -47,6 +47,7 @@ submissions/*.csv
 !submissions/README.md
 !starter_code/public_key.pem
 !data/public/*.csv
+!starter_code/*.png
 !sample_submission/predictions/*.png
 !*.json
 !*.csv
