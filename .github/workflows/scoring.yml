@@ -1,0 +1,85 @@
+name: GlioRad Challenge Auto-Grader
+
+on:
+  pull_request_target:
+    paths:
+      - 'submissions/**/*.enc'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install pandas numpy scikit-learn rsa
+
+      # 1. FIND THE NEW FILE AND DECRYPT IT
+      - name: Decrypt Submission
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          NEW_FILE=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '^submissions/.*\.enc$' | head -n 1)
+
+          if [ -z "$NEW_FILE" ]; then
+            echo "::error::No new .enc file found in this Pull Request!"
+            exit 1
+          fi
+
+          echo "🔍 Found new submission: $NEW_FILE"
+          python competition/decrypt.py "$NEW_FILE"
+          DECRYPTED_FILE="${NEW_FILE%.enc}"
+          echo "EVAL_FILE=$DECRYPTED_FILE" >> $GITHUB_ENV
+
+      # 2. VALIDATE SUBMISSION
+      - name: Validate Submission
+        run: |
+          echo "🔍 Validating: ${{ env.EVAL_FILE }}"
+          python competition/validate_submission.py "${{ env.EVAL_FILE }}" "data/public/test_manifest.csv" "leaderboard/leaderboard.csv"
+
+      # 3. RESTORE HIDDEN ANSWER KEY
+      - name: Restore Secret Answer Key
+        env:
+          TEST_LABELS: ${{ secrets.TEST_LABELS }}
+        run: |
+          if [ -n "$TEST_LABELS" ]; then
+            echo "$TEST_LABELS" | base64 -d | gzip -d > data/test_labels_hidden.csv
+          else
+            echo "::warning::TEST_LABELS secret not set. Falling back to public sample submission for testing."
+            cp data/public/sample_submission.csv data/test_labels_hidden.csv
+          fi
+
+      # 4. RUN SCORING
+      - name: Run Scoring Script
+        id: score
+        run: |
+          echo "📊 Running evaluation on ${{ env.EVAL_FILE }}..."
+          OUTPUT=$(python competition/evaluate.py "${{ env.EVAL_FILE }}" "data/test_labels_hidden.csv")
+          echo "$OUTPUT"
+          SCORE=$(echo "$OUTPUT" | grep -oP 'SCORE=\K[0-9.]+')
+          echo "extracted_score=$SCORE" >> $GITHUB_OUTPUT
+
+      # 5. POST COMMENT ON PR
+      - name: Comment on PR
+        uses: mshick/add-pr-comment@v2
+        with:
+          message: |
+            ### 🤖 Automated Grading Report: GlioRad Challenge
+            | Challenge | Metric | Score | Status |
+            | :--- | :--- | :--- | :--- |
+            | **GlioRad (Glioma MRI Segmentation)** | **Mean Slice Dice** | **${{ steps.score.outputs.extracted_score }}** | ✅ Valid |
+
+            *The official leaderboard will be updated automatically once this Pull Request is merged.*

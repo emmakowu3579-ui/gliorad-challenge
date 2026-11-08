@@ -1,0 +1,68 @@
+name: Admin Refresh Leaderboard
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install pandas numpy scikit-learn rsa
+
+      - name: Decrypt All Submissions
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          python -c "
+          import rsa, os, glob, sys
+          key_data = os.environ.get('PRIVATE_KEY')
+          if not key_data:
+              print('Warning: PRIVATE_KEY missing.')
+              sys.exit(0)
+          pk = rsa.PrivateKey.load_pkcs1(key_data.encode('utf8'))
+          for enc_file in glob.glob('submissions/*.enc'):
+              try:
+                  with open(enc_file, 'rb') as f: data = f.read()
+                  dec = b''
+                  for i in range(0, len(data), 256):
+                      dec += rsa.decrypt(data[i:i+256], pk)
+                  out = enc_file[:-4] if enc_file.endswith('.enc') else enc_file + '.csv'
+                  with open(out, 'wb') as f: f.write(dec)
+              except Exception as e:
+                  print(f'Skipped {enc_file}: {e}')
+          "
+
+      - name: Restore Secret Answer Key
+        env:
+          TEST_LABELS: ${{ secrets.TEST_LABELS }}
+        run: |
+          if [ -n "$TEST_LABELS" ]; then
+            echo "$TEST_LABELS" | base64 -d | gzip -d > data/test_labels_hidden.csv
+          else
+            cp data/public/sample_submission.csv data/test_labels_hidden.csv
+          fi
+
+      - name: Re-render Leaderboard
+        run: |
+          python competition/update_leaderboard.py
+          python competition/render_leaderboard.py
+
+      - name: Commit & Push Changes
+        run: |
+          git config --global user.name "LeaderboardBot"
+          git config --global user.email "bot@github.com"
+          git add LEADERBOARD.md leaderboard/leaderboard.csv
+          git diff --quiet && git diff --staged --quiet || git commit -m "🔄 Admin Refresh Leaderboard"
+          git push origin ${{ github.ref_name }}

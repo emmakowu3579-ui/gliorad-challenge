@@ -1,0 +1,36 @@
+# Baseline Hyperparameters & Settings for TCGA-LGG U-Net
+experiment_name: "unet_baseline_tcga_lgg"
+seed: 42
+
+data:
+  train_manifest: "data/mock_lgg/train_manifest.csv"
+  val_manifest: "data/mock_lgg/val_manifest.csv"
+  test_manifest: "data/mock_lgg/test_manifest.csv"
+  images_dir: "data/mock_lgg/images"
+  masks_dir: "data/mock_lgg/masks"
+  in_channels: 3
+  num_classes: 1  # Binary segmentation (output logits)
+  image_size: [256, 256]
+
+model:
+  architecture: "unet"
+  init_features: 32
+  dropout_prob: 0.2
+  use_batchnorm: true
+
+training:
+  batch_size: 8
+  epochs: 10
+  lr: 0.0005
+  weight_decay: 0.0001
+  dice_weight: 0.6
+  bce_weight: 0.4
+  lr_patience: 3
+  early_stopping_patience: 6
+  checkpoint_dir: "checkpoints"
+  log_interval: 5
+  device: "cuda"  # falls back to "cpu" if unavailable
+
+inference:
+  threshold: 0.5
+  output_dir: "sample_submission/predictions"

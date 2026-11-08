@@ -1,0 +1,4 @@
+team,score,date
+UNet-Baseline,0.8140,2026-11-06 12:00
+Attention-UNet,0.8450,2026-11-06 10:30
+Heuristic-Baseline,0.5000,2026-11-06 08:00

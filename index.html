@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlioRad Challenge Leaderboard — Glioma Radiogenomics MRI Segmentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    
+    <style>
+        body { background-color: #f8fafc; }
+        .dataTables_wrapper { padding-top: 1rem; }
+        table.dataTable thead th { background-color: #0f172a; color: white; border-radius: 4px; padding: 12px; }
+        table.dataTable tbody tr:hover { background-color: #f1f5f9; }
+    </style>
+</head>
+<body class="text-gray-800 font-sans p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto bg-white p-6 md:p-10 rounded-2xl shadow-xl border border-slate-200">
+        
+        <div class="text-center mb-8">
+            <span class="inline-block bg-teal-100 text-teal-800 text-sm font-semibold px-4 py-1 rounded-full mb-3">CV Code Bench &bull; GlioRad</span>
+            <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-3">🧠 GlioRad Challenge</h1>
+            <p class="text-lg text-slate-600 font-medium">Glioma Radiogenomics Brain MRI Segmentation Leaderboard</p>
+            <div class="mt-4 flex justify-center space-x-4 text-sm">
+                <a href="https://github.com" class="text-teal-600 hover:text-teal-800 font-semibold underline">GitHub Repository</a>
+                <span class="text-slate-300">|</span>
+                <a href="LEADERBOARD.md" class="text-teal-600 hover:text-teal-800 font-semibold underline">Markdown Table</a>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table id="leaderboard" class="display w-full stripe hover">
+                <thead>
+                    <tr>
+                        <th class="text-center">Rank</th>
+                        <th>Team Name</th>
+                        <th class="text-center">Mean Slice Dice</th>
+                        <th class="text-center">Last Submission</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="mt-8 pt-6 border-t border-slate-200 text-center text-xs text-slate-400">
+            Automated scoring powered by GitHub Actions & RSA-encrypted Pull Requests.
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+            Papa.parse("leaderboard/leaderboard.csv", {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    let tableData = [];
+                    let currentRank = 1;
+
+                    results.data.forEach(row => {
+                        let rankDisplay = currentRank;
+                        if (currentRank === 1) rankDisplay = "🥇 1";
+                        if (currentRank === 2) rankDisplay = "🥈 2";
+                        if (currentRank === 3) rankDisplay = "🥉 3";
+
+                        tableData.push([
+                            rankDisplay,
+                            row.team,
+                            parseFloat(row.score).toFixed(4),
+                            row.date
+                        ]);
+                        currentRank++;
+                    });
+
+                    $('#leaderboard').DataTable({
+                        data: tableData,
+                        pageLength: 25,
+                        order: [[2, 'desc']],
+                        language: {
+                            search: "🔍 Search Teams:"
+                        },
+                        columnDefs: [
+                            { targets: 0, className: 'dt-body-center font-bold' },
+                            { targets: 1, className: 'dt-body-left font-semibold text-slate-800' },
+                            { targets: 2, className: 'dt-body-center font-bold text-teal-700' },
+                            { targets: 3, className: 'dt-body-center text-slate-500' }
+                        ]
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

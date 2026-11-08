@@ -1,0 +1,95 @@
+name: Update Leaderboard
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'submissions/**/*.enc'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-table:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install pandas numpy scikit-learn rsa
+
+      # Decrypt all submissions
+      - name: Decrypt All Submissions
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          python -c "
+          import rsa, os, glob, sys
+
+          key_data = os.environ.get('PRIVATE_KEY')
+          if not key_data:
+              print('Warning: PRIVATE_KEY secret missing.')
+              sys.exit(0)
+
+          pk = rsa.PrivateKey.load_pkcs1(key_data.encode('utf8'))
+          files = glob.glob('submissions/*.enc')
+          print(f'Found {len(files)} encrypted submissions.')
+
+          for enc_file in files:
+              try:
+                  print(f'Decrypting {enc_file}...')
+                  with open(enc_file, 'rb') as f: encrypted_data = f.read()
+                  decrypted_data = b''
+                  chunk_size = 256
+                  for i in range(0, len(encrypted_data), chunk_size):
+                      decrypted_data += rsa.decrypt(encrypted_data[i:i+chunk_size], pk)
+                  csv_name = enc_file[:-4] if enc_file.endswith('.enc') else enc_file + '.csv'
+                  with open(csv_name, 'wb') as f: f.write(decrypted_data)
+              except Exception as e:
+                  print(f'Skipping {enc_file}: {e}')
+          "
+
+      # Restore answer key
+      - name: Restore Secret Answer Key
+        env:
+          TEST_LABELS: ${{ secrets.TEST_LABELS }}
+        run: |
+          if [ -n "$TEST_LABELS" ]; then
+            echo "$TEST_LABELS" | base64 -d | gzip -d > data/test_labels_hidden.csv
+          else
+            cp data/public/sample_submission.csv data/test_labels_hidden.csv
+          fi
+
+      # Generate new leaderboard
+      - name: Generate New Leaderboard
+        run: |
+          python competition/update_leaderboard.py
+          python competition/render_leaderboard.py
+
+      # Commit and push
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "LeaderboardBot"
+          git config --global user.email "bot@github.com"
+          cp LEADERBOARD.md /tmp/LEADERBOARD.md
+          cp leaderboard/leaderboard.csv /tmp/leaderboard.csv
+
+          git fetch origin ${{ github.ref_name }}
+          git checkout ${{ github.ref_name }}
+          git reset --hard origin/${{ github.ref_name }}
+
+          cp /tmp/LEADERBOARD.md LEADERBOARD.md
+          cp /tmp/leaderboard.csv leaderboard/leaderboard.csv
+
+          git add LEADERBOARD.md leaderboard/leaderboard.csv
+          git diff --quiet && git diff --staged --quiet || git commit -m "🏆 Update Leaderboard"
+          git push origin ${{ github.ref_name }}
