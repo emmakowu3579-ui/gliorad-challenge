@@ -26,8 +26,8 @@ def rle_to_mask(rle_string: str, shape=(256, 256)) -> np.ndarray:
 
     tokens = rle_string.strip().split()
     for i in range(0, len(tokens), 2):
-        start = int(tokens[i])
-        length = int(tokens[i + 1])
+        start = int(float(tokens[i]))
+        length = int(float(tokens[i + 1]))
         mask[start:start + length] = 1
 
     return mask.reshape(shape)
