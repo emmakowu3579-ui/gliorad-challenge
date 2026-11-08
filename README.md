@@ -148,4 +148,4 @@ When your PR is merged by a maintainer, 🎉 your score appears on the live Lead
 ## 🏆 Leaderboard
 
 - **Markdown Leaderboard Table:** [📈 View LEADERBOARD.md](LEADERBOARD.md)
-- **Interactive Web Leaderboard:** [🌐 View Interactive TCGA-LGG Leaderboard](index.html)
+- **Interactive Web Leaderboard:** [🌐 View Interactive GlioRad Leaderboard](https://emmakowu3579-ui.github.io/gliorad-challenge/)
