@@ -1,6 +1,6 @@
 # 🧠 GlioRad: Glioma Radiogenomics Brain MRI Segmentation Challenge
 
-[![Benchmark](https://img.shields.io/badge/Benchmark-GlioRad-teal?style=for-the-badge&logo=brain)](index.html)
+[![Live Leaderboard](https://img.shields.io/badge/Live%20Leaderboard-Web%20Dashboard-brightgreen?style=for-the-badge&logo=githubpages)](https://emmakowu3579-ui.github.io/gliorad-challenge/)
 [![Metric](https://img.shields.io/badge/Metric-Mean%20Slice%20Dice-blue?style=for-the-badge)](LEADERBOARD.md)
 [![Dataset](https://img.shields.io/badge/Dataset-TCGA--LGG%20Radiogenomics-orange?style=for-the-badge)](https://www.kaggle.com/datasets/mateuszbuda/lgg-mri-segmentation)
 [![Submissions](https://img.shields.io/badge/Submissions-Encrypted%20PRs-blueviolet?style=for-the-badge)](submissions/)
@@ -80,8 +80,8 @@ TCGA_DU_7008_19860101,4,30820 40 31076 40 31332 40
 
 ### 1️⃣ Clone the Repository & Install Dependencies
 ```bash
-git clone https://github.com/<your-org>/cv-code-bench.git
-cd cv-code-bench/challenge_02_tcga_lgg_segmentation
+git clone https://github.com/emmakowu3579-ui/gliorad-challenge.git
+cd gliorad-challenge
 pip install -r starter_code/requirements.txt
 ```
 
